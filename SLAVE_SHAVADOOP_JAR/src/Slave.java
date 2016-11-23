@@ -1,161 +1,222 @@
+
+// Modules to import.
+import java.io.BufferedInputStream;
+import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.io.PrintWriter;
-import java.text.Normalizer;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Scanner;
 
 
+// Class that will execute a map job or a reduce job on a worker machine.
 public class Slave {
 
 	
+//  Entry point. This method will be executed when Slave.jar is launched by a JobLauncher.
 	public static void main(String[] args) {
+				
+//		As we are in a static context, we need to instantiate a Slave object to be able to access 
+//		its fields and methods.
+		Slave slave = new Slave(args);
 		
-//	TODO Split process with "Runtime.getRuntime().availableProcessors();"
-//	TODO Create instance of Slave class and put code outside of main method.
-//	TODO Comment code.
-		
-		// Gets mode
-
-		String mode = null;
-		
+//		First we need to check whether the job is a map or a reduce.		
+//		If no arguments are passed, we throw an error.
 		if (args.length < 1) {
 			System.err.println("Must have <mode> as first argument");
 			System.exit(1);
+			
+//		If "SXUMX" is passed, then we launch a map job.
+		} else if (args[0].equals("SXUMX")){
+			slave.startMap();
+			
+//		If "UMXRMX" is passed, we launch a reduce job.
+		} else if (args[0].equals("UMXRMX")) {
+			slave.startReduce();
+			
+//		Otherwise we throw an error.
 		} else {
-			mode = args[0];
+			System.err.println("Mode must be in ['SXUMX', 'UMXRMX']");
+			System.exit(1);			
 		}
 		
-		
-		// Gets other arguments and launches method corresponding to mode
-		
-		if (mode.equals("SXUMX")) {
-
-			String sxFile = null;
-			String umxFile = null;
-			
-			if (args.length != 3) {
-				System.err.println("For SXUMX mode, must add <output file, input file> as arguments");
-				System.exit(1);
-			} else {
-				umxFile = args[1];
-				sxFile = args[2];
-				sxUmx(umxFile, sxFile);
-			}
-			
-		} else if (mode.equals("UMXRMX")) {
-
-			String[] keys = null;
-			String rmxFile = null;
-			String[] umxFiles = null;
-			
-			if (args.length != 4) {
-				System.err.println("For UMXRMX mode, must add <keys, output file, input files> "
-						+ "as arguments");
-				System.exit(1);
-			} else {
-				keys = args[1].split("___");
-				rmxFile = args[2];
-				umxFiles = args[3].split("___");
-				umxRmx(keys, rmxFile, umxFiles);
-			}
-			
-		} else {
-			System.err.println("Mode must be in [SXUMX, UMXRMX]");
-			System.exit(1);
-		}			
 	}
+	
+	
+//	Fields.
+	private String[] args; // Arguments given by the master.
 
 
-	private static void sxUmx(String outputFile, String inputFile) {
+//	Constructor. We initialize the fields here.
+	private Slave(String[] args) {
+		this.args = args;
+	}
+	
+	
+//	Called by the main method to run a map job.
+	private void startMap() {
+			
+//		First we need to extract the arguments given by the user.
+		File outputFile = null;
+		File inputFile = null;
 		
-		// Creates file with (word, 1) pairs and add keys to 'wordSet'
+//		We first need to check if the number of arguments given is correct. If they are not, we
+//		throw an error.
+		if (this.args.length != 3) {
+			System.err.println("For SXUMX mode, must add <output file, input file> as arguments");
+			System.exit(1);
+//		Otherwise we extract the arguments.
+		} else {
+			outputFile = new File(this.args[1]);
+			inputFile = new File(this.args[2]);
+		}
+				
+//		We want to split the job using the number of available processors. So we build an array
+//		of MapLaunchers.
+		int numProcessors = Runtime.getRuntime().availableProcessors();
+		MapLauncher[] mapLaunchers = new MapLauncher[numProcessors];
 		
-		Scanner inputScanner = null;
-		String[] words;
+//		Array of the input file decomposition.
+		int[] fileIndexes = new int[numProcessors + 1];
+		for (int i = 0; i < fileIndexes.length; i++) {
+			fileIndexes[i] = (int) Math.ceil(i * inputFile.length() / numProcessors);
+		}
+		
+//		For reading the input file.
+		FileInputStream inputReader = null;
+		
+//		For writing the output UMx file. Each thread will write its part with synchronization.
 		PrintWriter outputWriter = null;
 		
-		HashSet<String> wordSet = new HashSet<String>();
-				
 		try {
 			
-			inputScanner = new Scanner(new FileInputStream(inputFile));		
+			inputReader = new FileInputStream(inputFile);
 			outputWriter = new PrintWriter(outputFile);
 			
-			while (inputScanner.hasNextLine()) {
-				String line = inputScanner.nextLine();
-				line = line.toLowerCase();
-				line = Normalizer.normalize(line, Normalizer.Form.NFD);
-				line = line.replaceAll("[^\\p{ASCII}]", "");
-				line = line.replaceAll("[^a-z]", " ");
-				words = line.split("\\s+");
-				for (String word : words) {
-					if (!word.equals("") && !(word == null)) {
-						outputWriter.write(word + " " + 1 + "\n");
-						if (wordSet.add(word)) {
-							System.out.println(word);
-						}
-					}
+//			We then initialize the MapLaunchers and start the threads associated with each one.
+			for (int i = 0; i < mapLaunchers.length; i++) {
+				mapLaunchers[i] = new MapLauncher(fileIndexes[i], fileIndexes[i + 1], 
+						inputReader, outputWriter);
+				mapLaunchers[i].setThread(new Thread(mapLaunchers[i]));
+				mapLaunchers[i].getThread().start();
+			}	
+
+//			Now we wait for each thread to end.
+			for (MapLauncher mapLauncher : mapLaunchers) {
+				try {
+					mapLauncher.getThread().join();
+				} catch (InterruptedException e) {
+					e.printStackTrace();
 				}
 			}
 			
+//			The map job has ended, we now need to send the end signal to the master.
 			System.out.println("END OF PROCESS SXUMX");
 			
-		} catch (Exception e) {
-			e.printStackTrace();
+		} catch (FileNotFoundException e1) {
+			e1.printStackTrace();
 		} finally {
-			inputScanner.close();
-			outputWriter.close();
+			try {
+				inputReader.close();
+				outputWriter.close();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
 		}
+			
 	}
 	
 	
-	private static void umxRmx(String[] keys, String outputFile, String[] inputFiles) {
+//	Called by the main method to run a reduce job.
+	private void startReduce() {
 		
-		// Creates file with (key, count) for each keys given
-		Scanner inputScanner = null;
-		PrintWriter outputWriter = null;
-		HashMap<String, Integer> keysCounts = new HashMap<String, Integer>();
+//		First we need to extract the arguments given by the user.
+		File outputFile = null;
+		File[] inputFiles = null;
+		File keysFile = null;
 		
-		for (String key : keys) {
-			keysCounts.put(key, 0);
+//		We first need to check if the number of arguments given is correct. If they are not, we
+//		throw an error.
+		if (this.args.length != 4) {
+			System.err.println("For UMXRMX mode, must add <output file, input files, keys file> "
+					+ "as arguments");
+			System.exit(1);
+//		Otherwise we extract the arguments. The input files argument is send by the master
+//		with triple underscore as separator.
+		} else {
+			outputFile = new File(this.args[1]);
+			String[] inputFilesAsStrings = this.args[2].split("___");
+			inputFiles = new File[inputFilesAsStrings.length];
+			for (int i = 0; i < inputFilesAsStrings.length; i++) {
+				inputFiles[i] = new File(inputFilesAsStrings[i]);
+			}
+			keysFile = new File(this.args[3]);
 		}
-			
+		
+//		For reading the keys file.
+		BufferedInputStream keysReader = null;
+		String[] keys = null;
+
+//		For writing the output RMx file.
+		PrintWriter outputWriter = null;
+		
 		try {
 			
-			outputWriter = new PrintWriter(outputFile);
+//			Initializes the reader
+			keysReader = new BufferedInputStream(new FileInputStream(keysFile));
 			
-			for (String inputFile : inputFiles) {
-				inputScanner = new Scanner(new FileInputStream(inputFile));		
-				String wordRead = null;
-				Integer matchingCount = 0;
-				while (inputScanner.hasNextLine()) {			
-					if ((matchingCount = keysCounts.get(wordRead = inputScanner.nextLine().split(" ")[0])) != null) {
-						keysCounts.put(wordRead, matchingCount + 1);
-					}
+//			Reads the keys.
+			byte[] buffer = new byte[(int) keysFile.length()];
+			keysReader.read(buffer);
+			keys = (new String(buffer)).split("\\n");
+			System.err.println(keysFile.length());
+			
+//			We want to split the job using one thread for each input file. So we create an array
+//			of ReduceLaunchers and then launch the corresponding threads.
+			ReduceLauncher[] reduceLaunchers = new ReduceLauncher[inputFiles.length];
+			for (int inputFileNum = 0; inputFileNum < reduceLaunchers.length; inputFileNum++) {
+				reduceLaunchers[inputFileNum] = new ReduceLauncher(keys, inputFiles[inputFileNum]);
+				reduceLaunchers[inputFileNum].setThread(new Thread(reduceLaunchers[inputFileNum]));
+				reduceLaunchers[inputFileNum].getThread().start();
+			}
+			
+//			Now we wait for each thread to end.
+			for (ReduceLauncher reduceLauncher : reduceLaunchers) {
+				try {
+					reduceLauncher.getThread().join();
+				} catch (InterruptedException e) {
+					e.printStackTrace();
 				}
 			}
+
+//			Initializes the writer.
+			outputWriter = new PrintWriter(outputFile);
 			
-			Collections.sort(Arrays.asList(keys), new KeyComparator(keysCounts));
-			
+//			For each key we sum the counts of each partial reduce, send it to the master via SSH 
+//			and also write it to the output file.		
 			for (String key : keys) {
-				System.out.println(key + " " + keysCounts.get(key));
-			}
-			for (String key : keys) {
-				outputWriter.write(key + " " + keysCounts.get(key) + "\n");
+				int keyCount = 0;
+				for (ReduceLauncher reduceLauncher : reduceLaunchers) {
+					keyCount = keyCount + reduceLauncher.getKeysCounts().get(key);
+				}
+				System.out.println(key + " " + keyCount);
+				outputWriter.write(key + " " + keyCount + "\n");
 			}
 			
+//			The reduce job has ended, we now need to send the end signal to the master.
 			System.out.println("END OF PROCESS UMXRMX");
 			
 		} catch (Exception e) {
 			e.printStackTrace();
 		} finally {
-			inputScanner.close();
-			outputWriter.close();
+			try {
+				keysReader.close();
+				outputWriter.close();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
 		}
 		
 	}
 
 }
+
