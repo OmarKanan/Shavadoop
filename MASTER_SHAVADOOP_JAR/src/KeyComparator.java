@@ -1,7 +1,7 @@
 
 // Modules to import.
 import java.util.Comparator;
-import java.util.HashMap;
+import java.util.Map;
 
 
 // Class for comparing two keys (words) by their occurences.
@@ -9,11 +9,11 @@ public class KeyComparator implements Comparator<String> {
 
 	
 //	Dictionnary of occurences by word, sent as parameter when instantiating the class.
-	private HashMap<String, Integer> keyCounts;
+	private Map<String, Integer> keyCounts;
 	
 	
 //	Constructor.
-	public KeyComparator(HashMap<String, Integer> keyCounts) {
+	public KeyComparator(Map<String, Integer> keyCounts) {
 		this.keyCounts = keyCounts;
 	}
 

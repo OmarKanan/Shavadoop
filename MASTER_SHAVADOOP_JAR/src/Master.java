@@ -8,6 +8,8 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -19,13 +21,12 @@ import java.util.Set;
 // Main class.
 public class Master {
 
-	
+
 //  Entry point of the program. This method will be executed when you launch Master.jar.
 	public static void main(String[] args) {
 		
 //		As we are in a static context, we need to instantiate a Master object to be able to access 
-//		its fields and methods. We also need to pass "args" to the constructor, which should 
-//		contains the input files paths, otherwise the Master object wouldn't have access to it.
+//		its fields and methods.
 		Master master = new Master();
 
 //		Now we launch the method which will run our WordCount algorithm.
@@ -34,7 +35,7 @@ public class Master {
 
 
 //	Fields of the class. They are private so they can't be accessed from outside the class instance.
-	private String masterProjectDirectory; // Directory that contains the jars of the project.
+	private String workingDirectory; // Directory that contains the jars and files.
 	private long initialTime; // For timing the whole program.
 	private List<String> successAdresses; // List of the available machines (after testing SSH).
 	private List<JobLauncher> sxUmxJobLaunchers; // List of Sx -> UMx processes.
@@ -47,7 +48,7 @@ public class Master {
 	private Master() {
 		
 //		We initialize the fields here so they can be used later in the program.
-		this.masterProjectDirectory = System.getProperty("user.dir") + "/";
+		this.workingDirectory = System.getProperty("user.dir") + "/";
 		this.initialTime = System.currentTimeMillis();
 		this.successAdresses = new ArrayList<String>();
 		this.sxUmxJobLaunchers = new ArrayList<JobLauncher>();
@@ -76,6 +77,12 @@ public class Master {
 			adressesFile = new File(args[1]);
 			connectionTestTimeout = Integer.parseInt(args[2]);
 		}
+		
+//		We create the necessary folders.
+		new File(this.workingDirectory + "Sx").mkdirs();
+		new File(this.workingDirectory + "UMx").mkdirs();
+		new File(this.workingDirectory + "Keys").mkdirs();
+		new File(this.workingDirectory + "RMx").mkdirs();
 		
 //		Now we have to test the SSH connection with each adress, and store the successful adresses.
 		this.testSSHConnections(adressesFile, connectionTestTimeout);
@@ -214,8 +221,7 @@ public class Master {
 			int readSize = 0;
 			
 //			We now loop for each split we need to create.
-			int splitNumber = 0;
-			
+			int splitNumber = 0;			
 			while (splitNumber < this.successAdresses.size()
 //					For each loop we read "sizePerSplit" amount of bytes from the input file and
 //					we store them into the buffer, unless we had already reached the end of the
@@ -287,7 +293,7 @@ public class Master {
 
 	private void launchSxUMxJobs() {
 		
-//		We create an list "sxUmxJobLaunchers" containing one new JobLauncher for each
+//		We create a list "sxUmxJobLaunchers" containing one new JobLauncher for each
 //		Sx file we have.
 		for (int i = 0; i < this.successAdresses.size(); i++) {
 			
@@ -296,10 +302,11 @@ public class Master {
 			
 //			A new JobLauncher is initialized with the "SXUMX" mode, the adress of the
 //			machine (slave) associated with it, the expected path of the output UMx file,
-//			and the path of the split file Sx on which the slave will operate, as well as
-//			the project directory.
-			this.sxUmxJobLaunchers.add(new JobLauncher("SXUMX", adress, "UMx/UM_" + adress + ".txt",
-					"Sx/S_" + i + ".txt", this.masterProjectDirectory));
+//			and the path of the split file Sx on which the slave will operate, as well as 
+//			the directory containing the jars.
+			this.sxUmxJobLaunchers.add(new JobLauncher("SXUMX", adress, 
+					this.workingDirectory + "UMx/UM_" + adress + ".txt",
+					this.workingDirectory + "Sx/S_" + i + ".txt", this.workingDirectory));
 
 //			We set the JobLauncher field "thread" to be the new Thread based upon this JobLauncher
 //			(JobLauncher implements the Runnable interface).
@@ -345,7 +352,7 @@ public class Master {
 						numberOfEndedThreads++;
 						
 //					Otherwise it is a new key.
-					} else {					
+					} else if (!word.equals("")) {					
 //						If this key wasn't already present in the key/list_of_UMx Map, then we
 //						add it and initialize its associated UMx list.
 						if (!this.keysAndTheirUmx.containsKey(word)) {
@@ -353,8 +360,8 @@ public class Master {
 						}						
 //						We add the UMx to the list of UMx associated with this key.
 						this.keysAndTheirUmx.get(word).add(jobLauncher.getOutputUmxFile());
-					} 				
-				}			
+					}				
+				}
 			}				
 		}
 		
@@ -385,7 +392,7 @@ public class Master {
 		
 //		Sets the number of UMx -> RMx processes to the number of available adresses.
 		int numberOfUMxRMxProcesses = this.successAdresses.size();
-		
+
 //		We set the number of keys in each group such that the keys are fairly split between each
 //		one of the machines. So if P is the number of processes, K the number of keys, then the
 //		p first processes will have k+1 keys each, and the remaining processes will have k keys
@@ -416,8 +423,9 @@ public class Master {
 //			Array of keys which will be sent to the slave with the appropriate values.
 			String[] keysToSend = new String[keysRepartitionByProcess[i]];
 			
-//			We know fill the array of keys using the iterator previously created. Note that because
-//			of last paragraph, we don't need to check if the key iterator still has elements.
+//			We now fill the array of keys using the iterator previously created. Note that because
+//			of last "keysRepartitionByProcess", we don't need to check if the key iterator still 
+//			has elements.
 			for (int j = 0; j < keysToSend.length; j++) {
 				keysToSend[j] = keyIterator.next();
 			}
@@ -433,8 +441,10 @@ public class Master {
 //			machine (slave) associated with it, the array of keys to send, the expected 
 //			path of the output UMx file, and the paths of the files UMx on which the slave 
 //			will operate, as well as the project directory.
-			this.umxRMxJobLaunchers.add(new JobLauncher("UMXRMX", adress, keysToSend,
-					"RMx/RM_" + adress + ".txt", inputUmxFilesSet, this.masterProjectDirectory));
+			this.umxRMxJobLaunchers.add(new JobLauncher("UMXRMX", adress, 
+					Arrays.copyOf(keysToSend, keysToSend.length),
+					this.workingDirectory + "RMx/RM_" + adress + ".txt", inputUmxFilesSet,
+					this.workingDirectory));
 
 //			We set the JobLauncher field "thread" to be the new Thread based upon this JobLauncher
 //			(JobLauncher implements the Runnable interface).
@@ -491,11 +501,7 @@ public class Master {
 						String[] keyAndCount = couple.split(" ");
 						
 //						Adds them to the key_count Map.
-						this.keysAndCounts.put(keyAndCount[0], Integer.parseInt(keyAndCount[1]));
-						
-//						Adds the key to the sorted list hold by the corresponding JobLauncher.
-//						Note that we coded Slave such that it sends its couples in sorted order.
-						jobLauncher.getSortedFinalKeys().add(keyAndCount[0]);						
+						this.keysAndCounts.put(keyAndCount[0], Integer.parseInt(keyAndCount[1]));		
 					}								
 				}			
 			}				
@@ -524,6 +530,10 @@ public class Master {
 		long startTime = System.currentTimeMillis();
 		System.out.println("Starting assembling phase:");
 		
+//		We need to sort the list of keys by their count, using our custom Comprator.
+		List<String> sortedKeys = new ArrayList<String>(this.keysAndCounts.keySet());
+		Collections.sort(sortedKeys, new KeyComparator(this.keysAndCounts));
+		
 //		Object for writing the result file.
 		PrintWriter resultWriter = null;
 		
@@ -533,50 +543,9 @@ public class Master {
 //			Initializes the writer.
 			resultWriter = new PrintWriter("wordcount.txt");
 			
-//			Number of keys to write.
-			int numberOfKeys = this.keysAndCounts.size();
-			
-//			We have the key_count Map and the sorted lists of keys in the JobLaunchers.
-//			We can then easily merge these sorted lists into a sorted result file. 
-//			This operation isn't costly (see "Merge sort" algorithm), we just have to loop by
-//			comparing the first element of all the lists and taking the maximum, then removing it
-//			from the corresponding list, until no elements are left.
-			int i = 0;
-			while (i < numberOfKeys) {
-				
-//				list which currently has the maximum first element.
-				List<String> currentMaxList = null;
-				
-//				Loops for each JobLauncher.
-				for (JobLauncher jobLauncher : this.umxRMxJobLaunchers) {
-					
-//					If "currentMaxList" is null, then we set this list as the max one if it's
-//					not empty. If it is empty, then we just continue the loop.
-					if (currentMaxList == null) {
-						if (!jobLauncher.getSortedFinalKeys().isEmpty()) {
-							currentMaxList = jobLauncher.getSortedFinalKeys();
-						}
-						
-//					Otherwise we do the comparison of first elements with the current max list
-//					if it's not empty, and update the current max list if necessary. If it is
-//					empty we just continue the loop.
-					} else {
-						if (!jobLauncher.getSortedFinalKeys().isEmpty()) {
-							if (this.keysAndCounts.get(jobLauncher.getSortedFinalKeys().get(0)) 
-									> this.keysAndCounts.get(currentMaxList.get(0))) {
-								currentMaxList = jobLauncher.getSortedFinalKeys();
-							}
-						}
-					}
-				}
-				
-//				Now we write the max couple to the result file, and remove the key from its list.
-				resultWriter.write(currentMaxList.get(0) + " " + this.keysAndCounts.get(
-						currentMaxList.get(0)) + "\n");
-				currentMaxList.remove(0);
-				
-//				Updates the counter for next loop.
-				i++;
+//			We just have to write the pairs to the output file.
+			for (String key : sortedKeys) {
+				resultWriter.write(key + " " + this.keysAndCounts.get(key) + "\n");
 			}
 			
 //		Catches errors that can occur while writing to the file.
