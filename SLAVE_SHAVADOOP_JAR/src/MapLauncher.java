@@ -148,12 +148,13 @@ public class MapLauncher implements Runnable {
 					"quelles", "devant", "ici", "oui", "trop", "chaque", "deja", "tant", "avant",
 					"enfin", "ah", "voila", "tel", "fait", "est", "oh", "eh", "cas", "sont", 
 					"suis", "es", "etes", "ete", "sommes", "ont", "eu", "eus", "avait", "avaient",
-					"etait", "etaient", "lorsqu", "peut", "peux", "peuvent", "ayant"
+					"etait", "etaient", "lorsqu", "peut", "peux", "peuvent", "ayant", "i+", "vi+",
+					"i+x", "xi+"
 			};
 			
 //			Removes common words.
 			for (String word : commonWords) {
-				inputText = inputText.replaceAll(" " + word + " ", " ");		
+				inputText = inputText.replaceAll("(\\s+|^)" + word + "(\\s+|$)", " ");		
 			}
 	
 //			Splits the text into words.
